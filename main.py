@@ -6,7 +6,6 @@ from search import LLMManager
 async def main():
     llm = LLMManager()
 
-    # If you type a query in the terminal command line, use it. Otherwise, prompt for it.
     if len(sys.argv) > 1:
         user_query = " ".join(sys.argv[1:])
     else:
@@ -17,23 +16,36 @@ async def main():
         print("❌ Query cannot be empty.")
         return
 
-    print("\n🔍 Step 1: LLM is interpreting query and generating target portal URL...")
-    target_url = llm.generate_search_url(user_query)
-    print(f"🎯 Target URL generated: {target_url}")
+    print("\n🔍 Step 1: Mapping multi-portal targets via LLM...")
+    urls_to_scrape = llm.generate_portal_urls(user_query)
     
-    print("\n🌐 Step 2: Launching browser engine to scrape current options...")
-    scraped_text = await fetch_property_listings(target_url)
+    aggregated_raw_data = ""
     
-    if not scraped_text or len(scraped_text) < 200:
-        print("❌ Scraper returned insufficient data. The site might be blocking or listing patterns have shifted.")
+    print("\n🌐 Step 2: Initiating sequential cross-platform crawl...")
+    for portal_name, target_url in urls_to_scrape.items():
+        print(f"\n--- Crawling {portal_name.upper()} ---")
+        site_data = await fetch_property_listings(target_url)
+        
+        if "ERROR:" in site_data or len(site_data) < 200:
+            print(f"⚠️ Could not pull usable data from {portal_name}. Moving to next source.")
+            continue
+            
+        # Append data to aggregate context block
+        aggregated_raw_data += f"\n=== DATA FROM SOURCE: {portal_name.upper()} ===\n{site_data}\n"
+        
+        # A tiny safety delay between hitting different corporate firewalls
+        await asyncio.sleep(2)
+
+    if len(aggregated_raw_data) < 500:
+        print("\n❌ All portals blocked the automated scraper or returned empty results.")
         return
         
-    print("\n🧠 Step 3: Extracting and ranking the best matching properties...")
-    analysis_results = llm.analyze_listings(user_query, scraped_text)
+    print("\n🧠 Step 3: De-duplicating and cross-analyzing platform results...")
+    analysis_results = llm.analyze_listings(user_query, aggregated_raw_data)
     
-    print("\n" + "="*50)
-    print("🎯 THE HIGHEST RANKED PROPERTIES FOR YOU")
-    print("="*50)
+    print("\n" + "="*60)
+    print("🎯 CONSOLIDATED PORTAL RANKINGS (99ACRES / HOUSING / NOBROKER)")
+    print("="*60)
     print(analysis_results)
 
 if __name__ == "__main__":

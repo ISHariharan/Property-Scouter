@@ -1,63 +1,87 @@
 import asyncio
+import random
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
 async def fetch_property_listings(url: str) -> str:
     """
-    Launches a visible (headful) browser session to mimic a genuine user,
-    properly injecting anti-bot evasion scripts onto the context.
+    Launches an advanced humanized browser instance to mask automation footprints,
+    preventing security walls from throwing Access Denied/Block screens.
     """
-    print(f"🌐 Opening stealth browser to fetch: {url}")
+    print(f"🌐 Launching stealth crawler engine for: {url}")
     
     async with async_playwright() as p:
+        # Keep headless=False to significantly cut down security triggers on Indian real estate portals
         browser = await p.chromium.launch(
-            headless=False, # Changed to False so you can see if it gets blocked!
+            headless=False,
             args=[
                 '--disable-blink-features=AutomationControlled',
-                '--start-maximized'
+                '--no-sandbox',
+                '--disable-infobars',
+                '--window-position=0,0',
+                '--ignore-certificate-errors'
             ]
         )
         
-        # Create context
+        # Randomize user window sizes slightly so it doesn't look like an identical automated viewport
+        width = random.randint(1366, 1920)
+        height = random.randint(768, 1080)
+        
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US,en;q=0.9",
-            timezone_id="Asia/Kolkata"
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            viewport={"width": width, "height": height},
+            locale="en-IN,en-US;q=0.9,en;q=0.8",
+            timezone_id="Asia/Kolkata",
+            extra_http_headers={
+                "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+                "Referer": "https://www.google.com/"
+            }
         )
         
-        # ✅ FIX: evaluate_on_new_document belongs to CONTEXT, not PAGE
+        # Inject standard webdriver stealth fixes
         await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         """)
         
         page = await context.new_page()
         
         try:
-            # Navigate to the portal
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            # Navigate with a generous human-like timeout limit
+            await page.goto(url, wait_until="commit", timeout=90000)
             
-            # Let it sit for a few seconds to let listings completely cook
-            await asyncio.sleep(5)
+            # Let the primary page scripts and layout frame stabilize
+            await asyncio.sleep(random.uniform(4.5, 7.0))
             
-            # Scroll to load dynamic listing cards
-            for _ in range(3):
-                await page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(1.5)
+            # Check if we landed on a defensive block frame early
+            page_title = await page.title()
+            if "Blocked" in page_title or "Security Alert" in page_title:
+                print("⚠️ Early anti-bot block screen detected. Attempting page refresh switch...")
+                await page.reload(wait_until="domcontentloaded")
+                await asyncio.sleep(5)
+
+            # Humanized natural chunk-scrolling down the screen to wake up lazy-loaded elements
+            for _ in range(5):
+                scroll_amount = random.randint(400, 700)
+                await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                # Variable delay to match human scrolling behavior
+                await asyncio.sleep(random.uniform(1.5, 3.0))
 
             html_content = await page.content()
             await browser.close()
             
             soup = BeautifulSoup(html_content, "html.parser")
             
-            if "Access Denied" in soup.get_text():
-                print("❌ EdgeSuite/Akamai anti-bot wall is still blocking the request.")
+            # Verify body content check for blocks
+            page_text = soup.get_text()
+            if "Request Blocked" in page_text or "suspicious activity" in page_text:
+                print("❌ Firewall block confirmed. Scraper signature was recognized.")
                 return "ERROR: Access Denied by website firewall."
 
-            # Strip down elements
-            for element in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+            # Strip script and styling structural weight
+            for element in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe"]):
                 element.decompose()
                 
             clean_text = soup.get_text(separator="\n")
@@ -67,5 +91,5 @@ async def fetch_property_listings(url: str) -> str:
             
         except Exception as e:
             await browser.close()
-            print(f"❌ Scraping failed: {e}")
+            print(f"❌ Scraping engine timeout or exception: {e}")
             return ""

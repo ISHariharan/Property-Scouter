@@ -8,103 +8,84 @@ load_dotenv()
 
 class LLMManager:
     def __init__(self):
+        # Initialize Claude (Optional)
         self.claude_key = os.getenv("ANTHROPIC_API_KEY")
         self.claude_client = Anthropic(api_key=self.claude_key) if self.claude_key else None
         
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
-        self.gemini_client = genai.Client(api_key=self.gemini_key) if self.gemini_key else None
+        # Initialize Gemini via the new Google GenAI SDK
+        if os.getenv("GEMINI_API_KEY"):
+            self.gemini_client = genai.Client()
+        else:
+            self.gemini_client = None
 
-    def generate_search_url(self, user_query: str) -> str:
+    def generate_portal_urls(self, user_query: str) -> dict:
         """
-        Takes a natural English query and generates the appropriate 99acres search URL.
+        Extracts search parameters from user query and builds realistic, 
+        highly-targeted search queries for the platforms.
         """
         prompt = f"""
-        You are a url generation tool for 99acres. Analyzed the user's real estate search query and return a valid search URL.
+        Analyze this real estate query: "{user_query}"
         
-        User Query: "{user_query}"
+        Generate rental search URLs for 99acres, NoBroker, and Housing.com.
         
-        Rules for 99acres formatting:
-        1. General format for rental properties: https://www.99acres.com/property-for-rent-in-[city_name]-ffid
-        2. Clean the city name (lowercase, use hyphens for spaces). E.g., "Erode" becomes "erode", "New Delhi" becomes "new-delhi".
-        3. If no specific city is found, default to "erode".
+        Rules:
+        1. For NoBroker, the user wants properties within 15-20km of Oracle Tech Hub (Marathahalli/Kadubeesanahalli, Bangalore). 
+           Generate a direct search parameter payload using key localities near Outer Ring Road. 
+           Format exactly like this example for Bangalore localities (e.g., Marathahalli and Bellandur):
+           https://www.nobroker.in/property/rent/bangalore/multiple?searchParam=W3sibGF0IjoxMi45NTY0NjcyLCJsb24iOjc3LjcwMDExOTMsInBsYWNlSWQiOiJDaElKeF96bHREb1NyanNSVzhVbV9mY0g3bW8iLCJwbGFjZU5hbWUiOiJNYXJhdGthaGFsbGkifSx7ImxhdCI6MTIuOTMwNjgxOCwibG9uIjo3Ny42Nzg0NDM0LCJwbGFjZUlkIjoiQ2hJSktYclFka2tScmpzUjN2OTlSMzZ2Y0VVIiwicGxhY2VOYW1lIjoiQmVsbGFuZHVyIn1d&sharedAccomodation=false&commercial=false
         
-        Return ONLY a raw JSON object with a single key "url". Do not include any markdown fences or explanation text.
-        Example output format:
-        {{"url": "https://www.99acres.com/property-for-rent-in-erode-ffid"}}
+        2. For Housing.com, use a highly specific localized landing page instead of a generic city root:
+           https://housing.com/rent/flats-for-rent-in-marathahalli-bangalore-P54w87sh672m69olp
+           
+        3. For 99acres, generate a functional structured rental string:
+           https://www.99acres.com/property-for-rent-in-bangalore-ffid
+
+        Return ONLY a raw JSON object with keys "99acres", "housing", and "nobroker". 
+        Do not include markdown code fences or explanations.
         """
         
-        # Try Claude first
-        if self.claude_client:
-            try:
-                response = self.claude_client.messages.create(
-                    model="claude-3-5-sonnet-latest",
-                    max_tokens=150,
-                    temperature=0,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                data = json.loads(response.content[0].text.strip())
-                return data.get("url")
-            except RateLimitError:
-                pass # Failover to Gemini below
-            except Exception as e:
-                print(f"⚠️ Claude URL generation failed: {e}. Trying Gemini...")
-
-        # Gemini Backup
         if self.gemini_client:
             try:
                 response = self.gemini_client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=prompt,
                 )
-                # Clean up string if markdown JSON wrapping happened
                 text = response.text.replace("```json", "").replace("```", "").strip()
-                data = json.loads(text)
-                return data.get("url")
+                return json.loads(text)
             except Exception as e:
-                print(f"❌ Gemini URL generation failed: {e}")
+                print(f"⚠️ AI URL generation failed ({e}). Using targeted fallbacks...")
                 
-        # Default fallback if both fail
-        return "https://www.99acres.com/property-for-rent-in-erode-ffid"
+        # Hardcoded targeted fallbacks if API limits spike
+        return {
+            "99acres": "https://www.99acres.com/property-for-rent-in-bangalore-ffid",
+            "housing": "https://housing.com/rent/flats-for-rent-in-marathahalli-bangalore-P54w87sh672m69olp",
+            "nobroker": "https://www.nobroker.in/property/rent/bangalore/multiple?searchParam=W3sibGF0IjoxMi45Mzk2NDA2LCJsb24iOjc3DoubleNzY5NzE4NDcsInBsYWNlSWQiOiJDaElKOTNsdVpyTVVyanNSR0pka0xhV0ptV28iLCJwbGFjZU5hbWUiOiJLYWR1YmVlc2FuYWhhbGxpIn0seyJsYXQiOjEyLjk1NjQ2NzIsImxvbiI6NzcuNzAwMTE5MywicGxhY2VJZCI6IkNoSUp4X3psdERvU3Jqc1JXOFVtX2ZjSDdtbyIsInBsYWNlTmFtZSI6Ik1hcmF0aGhhaGFsbGkifV0=&sharedAccomodation=false"
+        }
 
     def analyze_listings(self, user_query, scraped_data):
         prompt = f"""
-        You are an expert real estate assistant. Deeply analyze the following raw scraped property data against the user's criteria.
+        You are an expert real estate aggregator. Deeply analyze the following data compiled across 99acres, Housing.com, and NoBroker.
         
-        User Criteria: "{user_query}"
+        User Requirements: "{user_query}"
         
-        Raw Data:
+        Aggregated Source Data:
         {scraped_data}
         
-        Provide a structured, ranked list of matching properties. For each, include:
-        1. Title & Location
-        2. Price & Configuration (e.g., 2BHK)
-        3. Match Score (0-100%) and a brief justification highlighting if it matches specific things like gated community, parking, or budget limits mentioned by the user.
+        Filter, deduplicate (if the same flat is on multiple sites), and provide a cross-portal ranked list of the best matches.
+        Include for each:
+        1. Title / Locality & Source Portal (e.g., Found on NoBroker)
+        2. Monthly Rent & Estimated Security Deposit
+        3. Match Analysis: Highlight how well it fits proximity requirements (e.g., within 15km of Oracle), furnishing, orientation (facing), and community features.
         """
 
-        if self.claude_client:
-            try:
-                print("🤖 Querying Claude (Primary Analysis)...")
-                response = self.claude_client.messages.create(
-                    model="claude-3-5-sonnet-latest",
-                    max_tokens=2000,
-                    temperature=0,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                return response.content[0].text
-            except RateLimitError:
-                print("⚠️ Claude API limit reached or rate-limited. Falling back to Gemini...")
-            except Exception as e:
-                print(f"⚠️ Claude encountered an error: {e}. Trying Gemini...")
-        
         if self.gemini_client:
             try:
-                print("♊ Querying Gemini (Backup Analysis)...")
+                print("♊ Aggregating and sorting results via Gemini...")
                 response = self.gemini_client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=prompt,
                 )
                 return response.text
             except Exception as e:
-                return f"❌ Both APIs failed. Gemini Error: {e}"
-        
-        return "❌ No API keys configured or both providers are unavailable."
+                return f"❌ Gemini Analysis Failed: {e}"
+        return "❌ Gemini Client is not initialized."
