@@ -5,91 +5,99 @@ from bs4 import BeautifulSoup
 
 async def fetch_property_listings(url: str) -> str:
     """
-    Launches an advanced humanized browser instance to mask automation footprints,
-    preventing security walls from throwing Access Denied/Block screens.
+    Stealth scraper that navigates to home dashboards and handles automated 
+    autocomplete typing interactions for complex portal architectures like NoBroker.
     """
-    print(f"🌐 Launching stealth crawler engine for: {url}")
+    print(f"🌐 Launching crawler engine...")
     
     async with async_playwright() as p:
-        # Keep headless=False to significantly cut down security triggers on Indian real estate portals
         browser = await p.chromium.launch(
-            headless=False,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--no-sandbox',
-                '--disable-infobars',
-                '--window-position=0,0',
-                '--ignore-certificate-errors'
-            ]
+            headless=False, # Keeping False so you can see it type!
+            args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
         )
-        
-        # Randomize user window sizes slightly so it doesn't look like an identical automated viewport
-        width = random.randint(1366, 1920)
-        height = random.randint(768, 1080)
         
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            viewport={"width": width, "height": height},
-            locale="en-IN,en-US;q=0.9,en;q=0.8",
-            timezone_id="Asia/Kolkata",
-            extra_http_headers={
-                "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
-                "Referer": "https://www.google.com/"
-            }
+            viewport={"width": 1440, "height": 900}
         )
-        
-        # Inject standard webdriver stealth fixes
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            window.chrome = { runtime: {} };
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        """)
         
         page = await context.new_page()
         
         try:
-            # Navigate with a generous human-like timeout limit
-            await page.goto(url, wait_until="commit", timeout=90000)
-            
-            # Let the primary page scripts and layout frame stabilize
-            await asyncio.sleep(random.uniform(4.5, 7.0))
-            
-            # Check if we landed on a defensive block frame early
-            page_title = await page.title()
-            if "Blocked" in page_title or "Security Alert" in page_title:
-                print("⚠️ Early anti-bot block screen detected. Attempting page refresh switch...")
-                await page.reload(wait_until="domcontentloaded")
-                await asyncio.sleep(5)
+            # Check if this is a custom structured NoBroker task
+            if "nobroker.in" in url and "localities=" in url:
+                from urllib.parse import urlparse, parse_qs, unquote
+                parsed_url = urlparse(url)
+                queries = parse_qs(parsed_url.query)
+                localities_str = queries.get('localities', [''])[0]
+                localities_to_search = [loc.strip() for loc in localities_str.split(',') if loc]
+                
+                print("⚡ Navigating to NoBroker Homepage...")
+                await page.goto("https://www.nobroker.in/", wait_until="domcontentloaded", timeout=60000)
+                await asyncio.sleep(4)
+                
+                # Input typing loop
+                for locality in localities_to_search:
+                    print(f"✍️ Typing neighborhood option: {locality}")
+                    
+                    # ✅ FIXED: Target the text input via its human-readable placeholder attribute
+                    input_selector = page.get_by_placeholder("Search upto 3 localities, societies or landmarks")
+                    await input_selector.click()
+                    await asyncio.sleep(0.5)
+                    
+                    # Type the area out realistically
+                    await input_selector.type(locality, delay=150)
+                    await asyncio.sleep(2.5) # Wait for drop-down suggestion menu to pop open
+                    
+                    # Target and click the very first visible suggestion item in the dropdown menu
+                    dropdown_suggestion = page.locator(".autocomplete-dropdown-container, .pac-container, div[id*='suggestion']").get_by_text(locality, exact=False).first
+                    if await dropdown_suggestion.is_visible():
+                        await dropdown_suggestion.click()
+                    else:
+                        # Secondary fallback: Press Arrow Down and Enter to select the top choice
+                        await input_selector.press("ArrowDown")
+                        await asyncio.sleep(0.5)
+                        await input_selector.press("Enter")
+                    
+                    await asyncio.sleep(1.5)
 
-            # Humanized natural chunk-scrolling down the screen to wake up lazy-loaded elements
-            for _ in range(5):
-                scroll_amount = random.randint(400, 700)
-                await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                # Variable delay to match human scrolling behavior
-                await asyncio.sleep(random.uniform(1.5, 3.0))
+                # Locate and click the primary Red Search Button
+                print("鼠标 Clicking search confirmation button...")
+                search_btn = page.locator("button.prop-search-button, button:has-text('Search')").first
+                await search_btn.click()
+                await page.wait_for_load_state("load", timeout=60000)
+                
+            else:
+                # Regular direct routing for 99acres and Housing
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            
+            # Dismiss overlay popups if they get in the way
+            await asyncio.sleep(6)
+            try:
+                for skip_text in ["Skip", "Got it"]:
+                    btn = page.get_by_role("button", name=skip_text)
+                    if await btn.is_visible():
+                        await btn.click()
+            except Exception:
+                pass
+                
+            # Scroll down to trigger dynamic loading of listing cards
+            for _ in range(4):
+                await page.evaluate("window.scrollBy(0, 600)")
+                await asyncio.sleep(1.5)
 
             html_content = await page.content()
             await browser.close()
             
+            # Extract and parse clean text data for Gemini
             soup = BeautifulSoup(html_content, "html.parser")
-            
-            # Verify body content check for blocks
-            page_text = soup.get_text()
-            if "Request Blocked" in page_text or "suspicious activity" in page_text:
-                print("❌ Firewall block confirmed. Scraper signature was recognized.")
-                return "ERROR: Access Denied by website firewall."
-
-            # Strip script and styling structural weight
             for element in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe"]):
                 element.decompose()
                 
             clean_text = soup.get_text(separator="\n")
-            lines = [line.strip() for line in clean_text.splitlines() if line.strip()]
-            
-            return "\n".join(lines)
+            return "\n".join([line.strip() for line in clean_text.splitlines() if line.strip()])
             
         except Exception as e:
             await browser.close()
-            print(f"❌ Scraping engine timeout or exception: {e}")
+            print(f"❌ Scraping engine runner exception: {e}")
             return ""

@@ -16,35 +16,57 @@ async def main():
         print("❌ Query cannot be empty.")
         return
 
-    print("\n🔍 Step 1: Mapping multi-portal targets via LLM...")
-    urls_to_scrape = llm.generate_portal_urls(user_query)
+    print("\n🔍 Step 1: Running AI location mapping & expansion...")
+    search_plan = llm.plan_search_targets(user_query)
+    
+    localities = search_plan.get("nobroker_localities", [])
+    
+    # Slicing localities into clean batches of max 3 items
+    chunk_size = 3
+    locality_chunks = [localities[i:i + chunk_size] for i in range(0, len(localities), chunk_size)]
     
     aggregated_raw_data = ""
     
-    print("\n🌐 Step 2: Initiating sequential cross-platform crawl...")
-    for portal_name, target_url in urls_to_scrape.items():
-        print(f"\n--- Crawling {portal_name.upper()} ---")
-        site_data = await fetch_property_listings(target_url)
+    print("\n🌐 Step 2: Executing sequential cross-platform scraping runs...")
+
+    # --- Crawl 99acres ---
+    print("\n--- Crawling 99ACRES (Reliable Root Layout) ---")
+    data_99 = await fetch_property_listings(search_plan.get("99acres_url"))
+    if "ERROR:" not in data_99 and len(data_99) > 200:
+        aggregated_raw_data += f"\n=== DATA FROM SOURCE: 99ACRES ===\n{data_99}\n"
+    await asyncio.sleep(2)
+
+    # --- Crawl Housing.com ---
+    print("\n--- Crawling HOUSING.COM (Reliable Root Layout) ---")
+    data_housing = await fetch_property_listings(search_plan.get("housing_url"))
+    if "ERROR:" not in data_housing and len(data_housing) > 200:
+        aggregated_raw_data += f"\n=== DATA FROM SOURCE: HOUSING ===\n{data_housing}\n"
+    await asyncio.sleep(2)
+
+    # --- Crawl NoBroker Chunks using the new selector strategy ---
+    for index, chunk in enumerate(locality_chunks, start=1):
+        print(f"\n--- Crawling NOBROKER (Batch #{index}: {', '.join(chunk)}) ---")
         
-        if "ERROR:" in site_data or len(site_data) < 200:
-            print(f"⚠️ Could not pull usable data from {portal_name}. Moving to next source.")
+        # We pass a clear tracking identifier format to the scraper
+        target_payload = f"https://www.nobroker.in/?localities={','.join(chunk)}"
+        
+        chunk_data = await fetch_property_listings(target_payload)
+        if "ERROR:" in chunk_data or len(chunk_data) < 200:
+            print(f"⚠️ Batch #{index} returned empty text data. Shifting forward.")
             continue
             
-        # Append data to aggregate context block
-        aggregated_raw_data += f"\n=== DATA FROM SOURCE: {portal_name.upper()} ===\n{site_data}\n"
-        
-        # A tiny safety delay between hitting different corporate firewalls
-        await asyncio.sleep(2)
+        aggregated_raw_data += f"\n=== DATA FROM SOURCE: NOBROKER BATCH {index} ===\n{chunk_data}\n"
+        await asyncio.sleep(3)
 
     if len(aggregated_raw_data) < 500:
-        print("\n❌ All portals blocked the automated scraper or returned empty results.")
+        print("\n❌ All portals returned zero readable properties.")
         return
         
-    print("\n🧠 Step 3: De-duplicating and cross-analyzing platform results...")
+    print("\n🧠 Step 3: Compiling, de-duplicating, and matching records...")
     analysis_results = llm.analyze_listings(user_query, aggregated_raw_data)
     
     print("\n" + "="*60)
-    print("🎯 CONSOLIDATED PORTAL RANKINGS (99ACRES / HOUSING / NOBROKER)")
+    print("🎯 ULTIMATE MULTI-BATCH AGGREGATION RANKINGS")
     print("="*60)
     print(analysis_results)
 
