@@ -21,10 +21,6 @@ async def main():
     
     localities = search_plan.get("nobroker_localities", [])
     
-    # Slicing localities into clean batches of max 3 items
-    chunk_size = 3
-    locality_chunks = [localities[i:i + chunk_size] for i in range(0, len(localities), chunk_size)]
-    
     aggregated_raw_data = ""
     
     print("\n🌐 Step 2: Executing sequential cross-platform scraping runs...")
@@ -43,19 +39,19 @@ async def main():
         aggregated_raw_data += f"\n=== DATA FROM SOURCE: HOUSING ===\n{data_housing}\n"
     await asyncio.sleep(2)
 
-    # --- Crawl NoBroker Chunks using the new selector strategy ---
-    for index, chunk in enumerate(locality_chunks, start=1):
-        print(f"\n--- Crawling NOBROKER (Batch #{index}: {', '.join(chunk)}) ---")
+    # --- Crawl NoBroker Localities One by One ---
+    for index, locality in enumerate(localities, start=1):
+        print(f"\n--- Crawling NOBROKER (Location #{index}: {locality}) ---")
         
-        # We pass a clear tracking identifier format to the scraper
-        target_payload = f"https://www.nobroker.in/?localities={','.join(chunk)}"
+        # Pass a single locality name in our tracking payload
+        target_payload = f"https://www.nobroker.in/?localities={locality}"
         
         chunk_data = await fetch_property_listings(target_payload)
         if "ERROR:" in chunk_data or len(chunk_data) < 200:
-            print(f"⚠️ Batch #{index} returned empty text data. Shifting forward.")
+            print(f"⚠️ {locality} returned empty text data. Shifting forward.")
             continue
             
-        aggregated_raw_data += f"\n=== DATA FROM SOURCE: NOBROKER BATCH {index} ===\n{chunk_data}\n"
+        aggregated_raw_data += f"\n=== DATA FROM SOURCE: NOBROKER - {locality.upper()} ===\n{chunk_data}\n"
         await asyncio.sleep(3)
 
     if len(aggregated_raw_data) < 500:

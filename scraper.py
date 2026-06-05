@@ -12,7 +12,7 @@ async def fetch_property_listings(url: str) -> str:
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False, # Keeping False so you can see it type!
+            headless=False, # Keeping False so you can see it work!
             args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
         )
         
@@ -29,40 +29,37 @@ async def fetch_property_listings(url: str) -> str:
                 from urllib.parse import urlparse, parse_qs, unquote
                 parsed_url = urlparse(url)
                 queries = parse_qs(parsed_url.query)
-                localities_str = queries.get('localities', [''])[0]
-                localities_to_search = [loc.strip() for loc in localities_str.split(',') if loc]
+                locality = unquote(queries.get('localities', [''])[0].strip())
                 
                 print("⚡ Navigating to NoBroker Homepage...")
                 await page.goto("https://www.nobroker.in/", wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(4)
                 
-                # Input typing loop
-                for locality in localities_to_search:
-                    print(f"✍️ Typing neighborhood option: {locality}")
-                    
-                    # ✅ FIXED: Target the text input via its human-readable placeholder attribute
-                    input_selector = page.get_by_placeholder("Search upto 3 localities, societies or landmarks")
-                    await input_selector.click()
+                print(f"✍️ Typing neighborhood option: {locality}")
+                
+                # Target the text input via its human-readable placeholder attribute
+                input_selector = page.get_by_placeholder("Search upto 3 localities, societies or landmarks")
+                await input_selector.click()
+                await asyncio.sleep(0.5)
+                
+                # Type the area out realistically
+                await input_selector.type(locality, delay=150)
+                await asyncio.sleep(2.5) # Wait for drop-down suggestion menu to pop open
+                
+                # Target and click the very first visible suggestion item in the dropdown menu
+                dropdown_suggestion = page.locator(".autocomplete-dropdown-container, .pac-container, div[id*='suggestion']").get_by_text(locality, exact=False).first
+                if await dropdown_suggestion.is_visible():
+                    await dropdown_suggestion.click()
+                else:
+                    # Fallback: Press Arrow Down and Enter to select top choice
+                    await input_selector.press("ArrowDown")
                     await asyncio.sleep(0.5)
-                    
-                    # Type the area out realistically
-                    await input_selector.type(locality, delay=150)
-                    await asyncio.sleep(2.5) # Wait for drop-down suggestion menu to pop open
-                    
-                    # Target and click the very first visible suggestion item in the dropdown menu
-                    dropdown_suggestion = page.locator(".autocomplete-dropdown-container, .pac-container, div[id*='suggestion']").get_by_text(locality, exact=False).first
-                    if await dropdown_suggestion.is_visible():
-                        await dropdown_suggestion.click()
-                    else:
-                        # Secondary fallback: Press Arrow Down and Enter to select the top choice
-                        await input_selector.press("ArrowDown")
-                        await asyncio.sleep(0.5)
-                        await input_selector.press("Enter")
-                    
-                    await asyncio.sleep(1.5)
+                    await input_selector.press("Enter")
+                
+                await asyncio.sleep(1.5)
 
                 # Locate and click the primary Red Search Button
-                print("鼠标 Clicking search confirmation button...")
+                print("🖱️ Clicking search confirmation button...")
                 search_btn = page.locator("button.prop-search-button, button:has-text('Search')").first
                 await search_btn.click()
                 await page.wait_for_load_state("load", timeout=60000)
